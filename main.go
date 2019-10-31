@@ -5,6 +5,7 @@ import (
     "github.com/stupboy/xingoudoc"
     "github.com/xingou_base/cache"
     "github.com/xingou_base/core"
+    "github.com/xingou_base/gate"
     "github.com/xingou_base/utli"
     "log"
     "reflect"
@@ -20,6 +21,15 @@ type XinGouApp struct {
     SerHost   string
     Api       []interface{}
     Redis     *redis.Pool
+    MiddleFunc []func(route core.XinGou, data gate.ApiData) (core.XinGou)
+}
+
+func (x *XinGouApp) AddMiddle(f func(gou core.XinGou, data gate.ApiData) (core.XinGou)) {
+    if len(x.MiddleFunc) == 0 {
+        x.MiddleFunc = []func(route core.XinGou, data gate.ApiData) (core.XinGou){f}
+    } else {
+        x.MiddleFunc = append(x.MiddleFunc, f)
+    }
 }
 
 func (x *XinGouApp) GetApiDoc(urlDir ...string) map[string]interface{} {
@@ -80,6 +90,7 @@ func (x *XinGouApp) Server(regHost string, SerHost string) {
 func (x *XinGouApp) Run() {
     // 初始化
     core.Init()
+    core.MiddleFunc = x.MiddleFunc
     core.Route.ApiDoc = x.GetApiDoc(x.Dir...)
     for _, api := range x.Api {
         data := reflect.ValueOf(api)

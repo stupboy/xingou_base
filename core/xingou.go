@@ -23,6 +23,7 @@ var FuncMap map[string]interface{}
 var ValidateMap map[string]interface{}
 var Route XinGou
 var RouteInfo map[string]interface{}
+var MiddleFunc []func(route XinGou, data gate.ApiData) (XinGou)
 
 type XinGou struct {
     Writer    *net.UDPConn
@@ -44,6 +45,7 @@ func Init() {
     initInfo := make(map[string]interface{})
     FuncMap = init
     RouteInfo = initInfo
+    MiddleFunc = make([]func(gou XinGou, data gate.ApiData) (XinGou), 0)
 }
 
 // 返写数据
@@ -174,6 +176,7 @@ func AddRoute(name string, method func(c *XinGou), desc ...string) {
     RouteInfo[name] = temp
 }
 
+
 func NoRoute(method func(c *XinGou)) {
     log.Println("添加MISS路由")
     FuncMap["NoRoute"] = method
@@ -192,7 +195,6 @@ func HandleConn(listener *net.UDPConn, Addr net.UDPAddr, data []byte) {
     RouteTemp.Writer = listener
     RouteTemp.Addr = Addr
     apiTime := time.Now().UnixNano()
-    //log.Println("api star:",apiTime)
     // 全局异常处理
     defer func() {
         if r := recover(); r != nil {
@@ -233,7 +235,6 @@ func HandleConn(listener *net.UDPConn, Addr net.UDPAddr, data []byte) {
         backData["type"] = "pong"
         backJson, _ := json.Marshal(backData)
         _, _ = RouteTemp.Writer.WriteToUDP(backJson, &RouteTemp.Addr)
-        //log.Println("p")
         // 记录心跳时间
         utli.PingMap.Store("ping_time", time.Now().Unix())
         return
@@ -251,21 +252,6 @@ func HandleConn(listener *net.UDPConn, Addr net.UDPAddr, data []byte) {
     if jsonData.UserToken != "" {
         RouteTemp.UserToken = jsonData.UserToken
     }
-    // 用户信息写入
-    if jsonData.UserInfo != nil {
-        RouteTemp.UserInfo = jsonData.UserInfo
-        valMap := []string{"school_id", "is_proxy", "proxy_id", "family_id", "teacher_id", "type", "id", "admin_role_id"}
-        for _, v := range valMap {
-            if RouteTemp.UserInfo[v] != nil && fmt.Sprintf("%T", RouteTemp.UserInfo[v]) != "int" {
-                RouteTemp.UserInfo[v] = int(RouteTemp.UserInfo[v].(float64))
-            }
-        }
-        if RouteTemp.UserInfo["teacher_id"] != nil && RouteTemp.UserInfo["teacher_id"].(int) != 0 {
-            //if model.GetTeacher("teacher_id="+strconv.Itoa(RouteTemp.UserInfo["teacher_id"].(int))+" and is_departure=0").TeacherId == 0 {
-            //    RouteTemp.UserInfo["type"] = 0
-            //}
-        }
-    }
     url := jsonData.Module + "/" + jsonData.Uri
     RouteTemp.Url = url
     log.Println("请求:", RouteTemp.Url, "请求Id:", RouteTemp.RequestId)
@@ -273,8 +259,12 @@ func HandleConn(listener *net.UDPConn, Addr net.UDPAddr, data []byte) {
     if _, ok = RouteTemp.ApiDoc[url]; !ok {
         panic("接口注释未写")
     }
+    log.Println(len(MiddleFunc))
+    for _, f := range MiddleFunc {
+        log.Println("test")
+        RouteTemp = f(RouteTemp, jsonData)
+    }
     RouteTemp.Data = validate.RequestValidate(RouteTemp.Data, RouteTemp.ApiDoc[url].(map[string]interface{}), ValidateMap)
-    // 登入信息写入
     // 路由不存在的情况
     if _, ok = FuncMap[url]; !ok {
         if _, ok = FuncMap["NoRoute"]; ok {
@@ -283,11 +273,6 @@ func HandleConn(listener *net.UDPConn, Addr net.UDPAddr, data []byte) {
             panic("路由不存在")
         }
     } else {
-        //notAccessMap := []string{"admin/login/index","admin/index/get_proxy_children"}
-        //todo 路由鉴权
-        //if !utli.InArray(notAccessMap, url) && Route.UserInfo["id"] != nil && !model.ValidateAccess(url, int(Route.UserInfo["id"].(float64))) {
-        //	panic("当前角色无权限")
-        //}
         FuncMap[url].(func(c *XinGou))(&RouteTemp)
     }
 }
